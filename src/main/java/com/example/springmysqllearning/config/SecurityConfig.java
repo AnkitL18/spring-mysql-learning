@@ -65,7 +65,26 @@ public class SecurityConfig {
 
                 // Authorization rules
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/customers",
+                                "/customers/**"
+                        ).hasAnyRole("USER", "ADMIN")
 
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/customers"
+                        ).hasAnyRole("USER", "ADMIN")
+
+                        .requestMatchers(
+                                HttpMethod.PUT,
+                                "/customers/**"
+                        ).hasAnyRole("USER", "ADMIN")
+
+                        .requestMatchers(
+                                HttpMethod.DELETE,
+                                "/customers/**"
+                        ).hasRole("ADMIN")
                         // Authentication endpoints are public
                         .requestMatchers("/auth/**").permitAll()
 
