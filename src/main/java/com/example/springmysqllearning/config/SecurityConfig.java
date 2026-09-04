@@ -67,6 +67,31 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 HttpMethod.GET,
+                                "/categories",
+                                "/categories/**",
+                                "/products",
+                                "/products/**"
+                        ).hasAnyRole("USER", "ADMIN")
+
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/categories",
+                                "/products"
+                        ).hasAnyRole("USER", "ADMIN")
+
+                        .requestMatchers(
+                                HttpMethod.PUT,
+                                "/categories/**",
+                                "/products/**"
+                        ).hasAnyRole("USER", "ADMIN")
+
+                        .requestMatchers(
+                                HttpMethod.DELETE,
+                                "/categories/**",
+                                "/products/**"
+                        ).hasRole("ADMIN")
+                        .requestMatchers(
+                                HttpMethod.GET,
                                 "/customers",
                                 "/customers/**"
                         ).hasAnyRole("USER", "ADMIN")
