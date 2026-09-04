@@ -11,23 +11,16 @@ public class AiService {
     private final Client geminiClient;
 
     public AiService() {
-
-        System.out.println(">>> Creating Gemini client...");
-
         geminiClient = Client.builder()
                 .apiKey(System.getenv("GEMINI_API_KEY"))
                 .build();
-
-        System.out.println(">>> Gemini client created");
     }
 
     public AiResponseDTO askAi(String prompt) {
 
-        System.out.println(">>> Gemini prompt: " + prompt);
-
         GenerateContentResponse response =
                 geminiClient.models.generateContent(
-                        "gemini-3.7-flash",
+                        "gemini-3.5-flash-lite",
                         prompt,
                         null
                 );
