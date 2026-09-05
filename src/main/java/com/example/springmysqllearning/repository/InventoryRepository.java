@@ -20,6 +20,8 @@ public interface InventoryRepository
             Pageable pageable
     );
 
+    long countByCurrentStock(int stock);
+
     @Query("""
             SELECT i
             FROM Inventory i
@@ -29,4 +31,12 @@ public interface InventoryRepository
     Page<Inventory> findLowStock(
             Pageable pageable
     );
+
+    @Query("""
+            SELECT COUNT(i)
+            FROM Inventory i
+            WHERE i.currentStock > 0
+              AND i.currentStock <= i.reorderLevel
+            """)
+    long countLowStock();
 }
