@@ -1,5 +1,6 @@
 package com.example.springmysqllearning.entity;
-
+import java.util.ArrayList;
+import java.util.List;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
@@ -47,6 +48,11 @@ public class Customer {
         createdAt = now;
         updatedAt = now;
     }
+    @OneToMany(
+            mappedBy = "customer",
+            fetch = FetchType.LAZY
+    )
+    private List<Order> orders = new ArrayList<>();
 
     @PreUpdate
     protected void onUpdate() {
@@ -107,5 +113,8 @@ public class Customer {
 
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
+    }
+    public List<Order> getOrders() {
+        return orders;
     }
 }
