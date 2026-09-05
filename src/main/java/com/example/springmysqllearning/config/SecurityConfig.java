@@ -67,6 +67,21 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 HttpMethod.GET,
+                                "/inventory",
+                                "/inventory/**"
+                        ).hasAnyRole("USER", "ADMIN")
+
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/inventory/**"
+                        ).hasAnyRole("USER", "ADMIN")
+
+                        .requestMatchers(
+                                HttpMethod.PUT,
+                                "/inventory/**"
+                        ).hasAnyRole("USER", "ADMIN")
+                        .requestMatchers(
+                                HttpMethod.GET,
                                 "/suppliers",
                                 "/suppliers/**",
                                 "/purchases",

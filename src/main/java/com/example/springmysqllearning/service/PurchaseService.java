@@ -23,7 +23,7 @@ import java.util.List;
 
 @Service
 public class PurchaseService {
-
+    private final InventoryService inventoryService;
     private final PurchaseRepository purchaseRepository;
     private final SupplierRepository supplierRepository;
     private final ProductRepository productRepository;
@@ -31,11 +31,13 @@ public class PurchaseService {
     public PurchaseService(
             PurchaseRepository purchaseRepository,
             SupplierRepository supplierRepository,
-            ProductRepository productRepository) {
+            ProductRepository productRepository,
+            InventoryService inventoryService) {
 
         this.purchaseRepository = purchaseRepository;
         this.supplierRepository = supplierRepository;
         this.productRepository = productRepository;
+        this.inventoryService = inventoryService;
     }
 
     @Transactional
@@ -160,7 +162,7 @@ public class PurchaseService {
     @Transactional
     public PurchaseResponseDTO updatePurchaseStatus(
             Long id,
-            PurchaseStatus status) {
+            PurchaseStatus newStatus) {
 
         Purchase purchase =
                 purchaseRepository.findById(id)
@@ -169,7 +171,39 @@ public class PurchaseService {
                                         "Purchase not found with id: " + id
                                 ));
 
-        purchase.setStatus(status);
+        PurchaseStatus oldStatus =
+                purchase.getStatus();
+
+        if (oldStatus == newStatus) {
+            return mapToResponse(purchase);
+        }
+
+        if (oldStatus == PurchaseStatus.CANCELLED) {
+            throw new IllegalArgumentException(
+                    "Cancelled purchase cannot change status"
+            );
+        }
+
+        if (oldStatus == PurchaseStatus.RECEIVED) {
+            throw new IllegalArgumentException(
+                    "Received purchase cannot change status"
+            );
+        }
+
+        if (newStatus == PurchaseStatus.RECEIVED) {
+
+            for (PurchaseItem item : purchase.getItems()) {
+
+                inventoryService.increaseStock(
+                        item.getProduct().getId(),
+                        item.getQuantity()
+                );
+            }
+
+            purchase.setStockApplied(true);
+        }
+
+        purchase.setStatus(newStatus);
 
         return mapToResponse(
                 purchaseRepository.save(purchase)

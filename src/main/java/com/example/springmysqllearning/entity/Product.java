@@ -58,6 +58,11 @@ public class Product {
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+    @OneToOne(
+            mappedBy = "product",
+            fetch = FetchType.LAZY
+    )
+    private Inventory inventory;
 
     public Long getId() {
         return id;
@@ -81,6 +86,9 @@ public class Product {
 
     public void setSku(String sku) {
         this.sku = sku;
+    }
+    public Inventory getInventory() {
+        return inventory;
     }
 
     public String getDescription() {

@@ -52,13 +52,15 @@ public class Purchase {
 
     public Purchase() {
     }
+    @Column(nullable = false)
+    private boolean stockApplied;
 
     @PrePersist
     protected void onCreate() {
         LocalDateTime now = LocalDateTime.now();
         createdAt = now;
         updatedAt = now;
-
+        stockApplied = false;
         if (status == null) {
             status = PurchaseStatus.DRAFT;
         }
@@ -88,6 +90,9 @@ public class Purchase {
     public PurchaseStatus getStatus() {
         return status;
     }
+    public boolean isStockApplied() {
+        return stockApplied;
+    }
 
     public BigDecimal getTotalAmount() {
         return totalAmount;
@@ -112,6 +117,10 @@ public class Purchase {
     public void setSupplier(Supplier supplier) {
         this.supplier = supplier;
     }
+    public void setStockApplied(boolean stockApplied) {
+        this.stockApplied = stockApplied;
+    }
+
 
     public void setPurchaseDate(LocalDate purchaseDate) {
         this.purchaseDate = purchaseDate;

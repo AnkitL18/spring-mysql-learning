@@ -1,5 +1,5 @@
 package com.example.springmysqllearning.service;
-
+import org.springframework.transaction.annotation.Transactional;
 import com.example.springmysqllearning.dto.ProductRequestDTO;
 import com.example.springmysqllearning.dto.ProductResponseDTO;
 import com.example.springmysqllearning.entity.Category;
@@ -10,21 +10,25 @@ import com.example.springmysqllearning.repository.ProductRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-
+import com.example.springmysqllearning.entity.Inventory;
+import com.example.springmysqllearning.repository.InventoryRepository;
 @Service
 public class ProductService {
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
-
+    private final InventoryRepository inventoryRepository;
     public ProductService(
             ProductRepository productRepository,
-            CategoryRepository categoryRepository) {
+            CategoryRepository categoryRepository,
+            InventoryRepository inventoryRepository) {
 
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
+        this.inventoryRepository = inventoryRepository;
     }
 
+    @Transactional
     public ProductResponseDTO createProduct(
             ProductRequestDTO request) {
 
@@ -56,7 +60,14 @@ public class ProductService {
 
         Product savedProduct =
                 productRepository.save(product);
+        Inventory inventory = new Inventory();
 
+        inventory.setProduct(savedProduct);
+        inventory.setCurrentStock(0);
+        inventory.setReorderLevel(10);
+        inventory.setMaximumStock(100);
+
+        inventoryRepository.save(inventory);
         return mapToResponse(savedProduct);
     }
 
