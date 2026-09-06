@@ -9,6 +9,8 @@ import com.example.springmysqllearning.entity.Order;
 import com.example.springmysqllearning.entity.Order.OrderStatus;
 import com.example.springmysqllearning.entity.OrderItem;
 import com.example.springmysqllearning.entity.Product;
+import com.example.springmysqllearning.exception.InsufficientStockException;
+import com.example.springmysqllearning.exception.InvalidOrderStatusException;
 import com.example.springmysqllearning.exception.ResourceNotFoundException;
 import com.example.springmysqllearning.repository.CustomerRepository;
 import com.example.springmysqllearning.repository.InventoryRepository;
@@ -30,21 +32,22 @@ public class OrderService {
     private final CustomerRepository customerRepository;
     private final ProductRepository productRepository;
     private final InventoryRepository inventoryRepository;
-    private final InventoryService inventoryService;
 
     public OrderService(
             OrderRepository orderRepository,
             CustomerRepository customerRepository,
             ProductRepository productRepository,
-            InventoryRepository inventoryRepository,
-            InventoryService inventoryService) {
+            InventoryRepository inventoryRepository) {
 
         this.orderRepository = orderRepository;
         this.customerRepository = customerRepository;
         this.productRepository = productRepository;
         this.inventoryRepository = inventoryRepository;
-        this.inventoryService = inventoryService;
     }
+
+    // =========================================================
+    // CREATE ORDER
+    // =========================================================
 
     @Transactional
     public OrderResponseDTO createOrder(
@@ -60,7 +63,8 @@ public class OrderService {
                                                 + request.getCustomerId()
                                 ));
 
-        Order order = new Order();
+        Order order =
+                new Order();
 
         order.setCustomer(customer);
         order.setStatus(OrderStatus.PENDING);
@@ -82,8 +86,7 @@ public class OrderService {
                                     ));
 
             Inventory inventory =
-                    inventoryRepository
-                            .findByProductId(
+                    inventoryRepository.findByProductId(
                                     product.getId()
                             )
                             .orElseThrow(() ->
@@ -93,15 +96,21 @@ public class OrderService {
                                     ));
 
             /*
-             * We validate stock at order creation,
-             * but don't reduce it until confirmation.
+             * We only CHECK stock here.
+             *
+             * Stock is actually deducted when the order
+             * moves from PENDING → CONFIRMED.
              */
             if (inventory.getCurrentStock()
                     < itemRequest.getQuantity()) {
 
-                throw new IllegalArgumentException(
+                throw new InsufficientStockException(
                         "Insufficient stock for product: "
                                 + product.getName()
+                                + ". Available: "
+                                + inventory.getCurrentStock()
+                                + ", Required: "
+                                + itemRequest.getQuantity()
                 );
             }
 
@@ -127,7 +136,8 @@ public class OrderService {
 
             order.addItem(orderItem);
 
-            total = total.add(subtotal);
+            total =
+                    total.add(subtotal);
         }
 
         order.setTotalAmount(total);
@@ -137,6 +147,10 @@ public class OrderService {
 
         return mapToResponse(savedOrder);
     }
+
+    // =========================================================
+    // GET ORDERS
+    // =========================================================
 
     @Transactional(readOnly = true)
     public Page<OrderResponseDTO> getOrders(
@@ -171,117 +185,222 @@ public class OrderService {
         return orders.map(this::mapToResponse);
     }
 
+    // =========================================================
+    // GET ORDER BY ID
+    // =========================================================
+
     @Transactional(readOnly = true)
-    public OrderResponseDTO getOrderById(Long id) {
+    public OrderResponseDTO getOrderById(
+            Long id) {
 
         Order order =
                 orderRepository.findById(id)
                         .orElseThrow(() ->
                                 new ResourceNotFoundException(
-                                        "Order not found with id: " + id
+                                        "Order not found with id: "
+                                                + id
                                 ));
 
         return mapToResponse(order);
     }
 
+    // =========================================================
+    // UPDATE ORDER STATUS
+    // =========================================================
+
     @Transactional
     public OrderResponseDTO updateOrderStatus(
-            Long id,
+            Long orderId,
             OrderStatus newStatus) {
 
+        if (newStatus == null) {
+
+            throw new IllegalArgumentException(
+                    "New order status cannot be null"
+            );
+        }
+
         Order order =
-                orderRepository.findById(id)
+                orderRepository.findById(orderId)
                         .orElseThrow(() ->
                                 new ResourceNotFoundException(
-                                        "Order not found with id: " + id
+                                        "Order not found with id: "
+                                                + orderId
                                 ));
 
-        OrderStatus oldStatus =
+        OrderStatus currentStatus =
                 order.getStatus();
 
-        if (oldStatus == newStatus) {
+        // -----------------------------------------------------
+        // Same status = no operation
+        // -----------------------------------------------------
+
+        if (currentStatus == newStatus) {
             return mapToResponse(order);
         }
 
-        if (oldStatus == OrderStatus.CANCELLED) {
-            throw new IllegalArgumentException(
-                    "Cancelled order cannot change status"
+        // -----------------------------------------------------
+        // Terminal states
+        // -----------------------------------------------------
+
+        if (currentStatus == OrderStatus.DELIVERED) {
+
+            throw new InvalidOrderStatusException(
+                    "Delivered order cannot be changed"
             );
         }
 
-        if (oldStatus == OrderStatus.DELIVERED) {
-            throw new IllegalArgumentException(
-                    "Delivered order cannot change status"
+        if (currentStatus == OrderStatus.CANCELLED) {
+
+            throw new InvalidOrderStatusException(
+                    "Cancelled order cannot be changed"
             );
         }
 
-        /*
-         * Stock is reduced exactly when
-         * the order becomes CONFIRMED.
-         */
-        if (newStatus == OrderStatus.CONFIRMED
-                && oldStatus == OrderStatus.PENDING) {
-
-            for (OrderItem item : order.getItems()) {
-
-                inventoryService.decreaseStock(
-                        item.getProduct().getId(),
-                        item.getQuantity()
-                );
-            }
-        }
+        // -----------------------------------------------------
+        // Validate transition
+        // -----------------------------------------------------
 
         validateStatusTransition(
-                oldStatus,
+                currentStatus,
                 newStatus
         );
 
+        // -----------------------------------------------------
+        // PENDING → CONFIRMED
+        //
+        // LOCK each inventory row before checking/decreasing.
+        // -----------------------------------------------------
+
+        if (currentStatus == OrderStatus.PENDING
+                && newStatus == OrderStatus.CONFIRMED) {
+
+            for (OrderItem item :
+                    order.getItems()) {
+
+                Inventory inventory =
+                        inventoryRepository
+                                .findByProductIdForUpdate(
+                                        item.getProduct().getId()
+                                )
+                                .orElseThrow(() ->
+                                        new ResourceNotFoundException(
+                                                "Inventory not found for product id: "
+                                                        + item.getProduct().getId()
+                                        ));
+
+                int currentStock =
+                        inventory.getCurrentStock();
+
+                if (currentStock
+                        < item.getQuantity()) {
+
+                    throw new InsufficientStockException(
+                            "Insufficient stock for product: "
+                                    + item.getProduct().getName()
+                                    + ". Available: "
+                                    + currentStock
+                                    + ", Required: "
+                                    + item.getQuantity()
+                    );
+                }
+
+                inventory.setCurrentStock(
+                        currentStock
+                                - item.getQuantity()
+                );
+
+                inventoryRepository.save(inventory);
+            }
+        }
+
+        // -----------------------------------------------------
+        // CONFIRMED → CANCELLED
+        //
+        // Restore stock.
+        // -----------------------------------------------------
+
+        if (currentStatus == OrderStatus.CONFIRMED
+                && newStatus == OrderStatus.CANCELLED) {
+
+            for (OrderItem item :
+                    order.getItems()) {
+
+                Inventory inventory =
+                        inventoryRepository
+                                .findByProductIdForUpdate(
+                                        item.getProduct().getId()
+                                )
+                                .orElseThrow(() ->
+                                        new ResourceNotFoundException(
+                                                "Inventory not found for product id: "
+                                                        + item.getProduct().getId()
+                                        ));
+
+                inventory.setCurrentStock(
+                        inventory.getCurrentStock()
+                                + item.getQuantity()
+                );
+
+                inventoryRepository.save(inventory);
+            }
+        }
+
+        // -----------------------------------------------------
+        // SAVE STATUS
+        // -----------------------------------------------------
+
         order.setStatus(newStatus);
 
-        return mapToResponse(
-                orderRepository.save(order)
-        );
+        Order savedOrder =
+                orderRepository.save(order);
+
+        return mapToResponse(savedOrder);
     }
 
+    // =========================================================
+    // ORDER STATE MACHINE
+    // =========================================================
+
     private void validateStatusTransition(
-            OrderStatus oldStatus,
+            OrderStatus currentStatus,
             OrderStatus newStatus) {
 
-        boolean valid = false;
+        boolean valid =
+                switch (currentStatus) {
 
-        if (oldStatus == OrderStatus.PENDING) {
+                    case PENDING ->
+                            newStatus == OrderStatus.CONFIRMED
+                                    || newStatus == OrderStatus.CANCELLED;
 
-            valid =
-                    newStatus == OrderStatus.CONFIRMED
-                            || newStatus == OrderStatus.CANCELLED;
+                    case CONFIRMED ->
+                            newStatus == OrderStatus.PROCESSING
+                                    || newStatus == OrderStatus.CANCELLED;
 
-        } else if (oldStatus == OrderStatus.CONFIRMED) {
+                    case PROCESSING ->
+                            newStatus == OrderStatus.SHIPPED;
 
-            valid =
-                    newStatus == OrderStatus.PROCESSING
-                            || newStatus == OrderStatus.CANCELLED;
+                    case SHIPPED ->
+                            newStatus == OrderStatus.DELIVERED;
 
-        } else if (oldStatus == OrderStatus.PROCESSING) {
-
-            valid =
-                    newStatus == OrderStatus.SHIPPED;
-
-        } else if (oldStatus == OrderStatus.SHIPPED) {
-
-            valid =
-                    newStatus == OrderStatus.DELIVERED;
-        }
+                    case DELIVERED, CANCELLED ->
+                            false;
+                };
 
         if (!valid) {
 
-            throw new IllegalArgumentException(
-                    "Invalid order status transition from "
-                            + oldStatus
-                            + " to "
+            throw new InvalidOrderStatusException(
+                    "Invalid order status transition: "
+                            + currentStatus
+                            + " → "
                             + newStatus
             );
         }
     }
+
+    // =========================================================
+    // MAP ENTITY → RESPONSE DTO
+    // =========================================================
 
     private OrderResponseDTO mapToResponse(
             Order order) {

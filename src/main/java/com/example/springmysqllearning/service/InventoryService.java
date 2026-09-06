@@ -5,6 +5,7 @@ import com.example.springmysqllearning.dto.InventoryResponseDTO;
 import com.example.springmysqllearning.dto.StockAdjustmentRequestDTO;
 import com.example.springmysqllearning.entity.Inventory;
 import com.example.springmysqllearning.entity.Product;
+import com.example.springmysqllearning.exception.InsufficientStockException;
 import com.example.springmysqllearning.exception.ResourceNotFoundException;
 import com.example.springmysqllearning.repository.InventoryRepository;
 import com.example.springmysqllearning.repository.ProductRepository;
@@ -27,6 +28,10 @@ public class InventoryService {
         this.productRepository = productRepository;
     }
 
+    // =========================================================
+    // CREATE INVENTORY
+    // =========================================================
+
     @Transactional
     public InventoryResponseDTO createInventory(
             Long productId,
@@ -41,6 +46,7 @@ public class InventoryService {
                                 ));
 
         if (inventoryRepository.existsByProductId(productId)) {
+
             throw new IllegalArgumentException(
                     "Inventory already exists for product id: "
                             + productId
@@ -72,6 +78,10 @@ public class InventoryService {
         return mapToResponse(savedInventory);
     }
 
+    // =========================================================
+    // GET ALL INVENTORY
+    // =========================================================
+
     @Transactional(readOnly = true)
     public Page<InventoryResponseDTO> getInventory(
             Pageable pageable) {
@@ -80,6 +90,12 @@ public class InventoryService {
                 .findAll(pageable)
                 .map(this::mapToResponse);
     }
+
+    // =========================================================
+    // GET INVENTORY BY PRODUCT
+    //
+    // Normal read — no lock required.
+    // =========================================================
 
     @Transactional(readOnly = true)
     public InventoryResponseDTO getInventoryByProductId(
@@ -96,13 +112,17 @@ public class InventoryService {
         return mapToResponse(inventory);
     }
 
+    // =========================================================
+    // UPDATE INVENTORY SETTINGS
+    // =========================================================
+
     @Transactional
     public InventoryResponseDTO updateInventorySettings(
             Long productId,
             InventoryRequestDTO request) {
 
         Inventory inventory =
-                inventoryRepository.findByProductId(productId)
+                inventoryRepository.findByProductIdForUpdate(productId)
                         .orElseThrow(() ->
                                 new ResourceNotFoundException(
                                         "Inventory not found for product id: "
@@ -130,13 +150,27 @@ public class InventoryService {
         );
     }
 
+    // =========================================================
+    // MANUAL STOCK ADJUSTMENT
+    // =========================================================
+
     @Transactional
     public InventoryResponseDTO adjustStock(
             Long productId,
             StockAdjustmentRequestDTO request) {
 
+        if (request.getQuantity() <= 0) {
+
+            throw new IllegalArgumentException(
+                    "Quantity must be greater than 0"
+            );
+        }
+
+        /*
+         * Lock the inventory row before reading/changing stock.
+         */
         Inventory inventory =
-                inventoryRepository.findByProductId(productId)
+                inventoryRepository.findByProductIdForUpdate(productId)
                         .orElseThrow(() ->
                                 new ResourceNotFoundException(
                                         "Inventory not found for product id: "
@@ -149,17 +183,16 @@ public class InventoryService {
         int quantity =
                 request.getQuantity();
 
-        if (quantity <= 0) {
-            throw new IllegalArgumentException(
-                    "Quantity must be greater than 0"
-            );
-        }
-
         int newStock;
+
+        // -----------------------------------------------------
+        // INCREASE
+        // -----------------------------------------------------
 
         if (request.getIncrease()) {
 
-            newStock = currentStock + quantity;
+            newStock =
+                    currentStock + quantity;
 
             if (newStock >
                     inventory.getMaximumStock()) {
@@ -170,14 +203,24 @@ public class InventoryService {
                 );
             }
 
-        } else {
+        }
 
-            newStock = currentStock - quantity;
+        // -----------------------------------------------------
+        // DECREASE
+        // -----------------------------------------------------
+
+        else {
+
+            newStock =
+                    currentStock - quantity;
 
             if (newStock < 0) {
 
-                throw new IllegalArgumentException(
-                        "Insufficient stock"
+                throw new InsufficientStockException(
+                        "Insufficient stock. Available: "
+                                + currentStock
+                                + ", Required: "
+                                + quantity
                 );
             }
         }
@@ -190,19 +233,29 @@ public class InventoryService {
         return mapToResponse(updatedInventory);
     }
 
+    // =========================================================
+    // INCREASE STOCK
+    //
+    // Used by PurchaseService when purchase is RECEIVED.
+    // =========================================================
+
     @Transactional
     public void increaseStock(
             Long productId,
             int quantity) {
 
         if (quantity <= 0) {
+
             throw new IllegalArgumentException(
                     "Quantity must be greater than 0"
             );
         }
 
+        /*
+         * Lock inventory row before changing stock.
+         */
         Inventory inventory =
-                inventoryRepository.findByProductId(productId)
+                inventoryRepository.findByProductIdForUpdate(productId)
                         .orElseThrow(() ->
                                 new ResourceNotFoundException(
                                         "Inventory not found for product id: "
@@ -213,14 +266,19 @@ public class InventoryService {
                 inventory.getCurrentStock() + quantity;
 
         /*
-         * We don't block received purchases from exceeding
-         * maximumStock. maximumStock is a planning threshold,
-         * not an absolute database limit.
+         * maximumStock is a planning threshold, not a hard
+         * limit for received purchases.
          */
         inventory.setCurrentStock(newStock);
 
         inventoryRepository.save(inventory);
     }
+
+    // =========================================================
+    // DECREASE STOCK
+    //
+    // Used when inventory must be reduced.
+    // =========================================================
 
     @Transactional
     public void decreaseStock(
@@ -228,26 +286,38 @@ public class InventoryService {
             int quantity) {
 
         if (quantity <= 0) {
+
             throw new IllegalArgumentException(
                     "Quantity must be greater than 0"
             );
         }
 
+        /*
+         * Lock inventory row before reading/changing stock.
+         */
         Inventory inventory =
-                inventoryRepository.findByProductId(productId)
+                inventoryRepository.findByProductIdForUpdate(productId)
                         .orElseThrow(() ->
                                 new ResourceNotFoundException(
                                         "Inventory not found for product id: "
                                                 + productId
                                 ));
 
+        int currentStock =
+                inventory.getCurrentStock();
+
         int newStock =
-                inventory.getCurrentStock() - quantity;
+                currentStock - quantity;
 
         if (newStock < 0) {
-            throw new IllegalArgumentException(
+
+            throw new InsufficientStockException(
                     "Insufficient stock for product id: "
                             + productId
+                            + ". Available: "
+                            + currentStock
+                            + ", Required: "
+                            + quantity
             );
         }
 
@@ -255,6 +325,10 @@ public class InventoryService {
 
         inventoryRepository.save(inventory);
     }
+
+    // =========================================================
+    // OUT OF STOCK
+    // =========================================================
 
     @Transactional(readOnly = true)
     public Page<InventoryResponseDTO> getOutOfStock(
@@ -265,6 +339,10 @@ public class InventoryService {
                 .map(this::mapToResponse);
     }
 
+    // =========================================================
+    // LOW STOCK
+    // =========================================================
+
     @Transactional(readOnly = true)
     public Page<InventoryResponseDTO> getLowStock(
             Pageable pageable) {
@@ -273,6 +351,10 @@ public class InventoryService {
                 .findLowStock(pageable)
                 .map(this::mapToResponse);
     }
+
+    // =========================================================
+    // ENTITY → RESPONSE DTO
+    // =========================================================
 
     private InventoryResponseDTO mapToResponse(
             Inventory inventory) {
@@ -293,6 +375,10 @@ public class InventoryService {
                 inventory.getUpdatedAt()
         );
     }
+
+    // =========================================================
+    // CALCULATE STOCK STATUS
+    // =========================================================
 
     private String calculateStatus(
             Inventory inventory) {

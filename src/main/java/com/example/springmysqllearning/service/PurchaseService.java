@@ -1,13 +1,14 @@
 package com.example.springmysqllearning.service;
 
 import com.example.springmysqllearning.dto.PurchaseItemRequestDTO;
-import com.example.springmysqllearning.dto.PurchaseResponseDTO;
 import com.example.springmysqllearning.dto.PurchaseRequestDTO;
+import com.example.springmysqllearning.dto.PurchaseResponseDTO;
 import com.example.springmysqllearning.entity.Product;
 import com.example.springmysqllearning.entity.Purchase;
 import com.example.springmysqllearning.entity.Purchase.PurchaseStatus;
 import com.example.springmysqllearning.entity.PurchaseItem;
 import com.example.springmysqllearning.entity.Supplier;
+import com.example.springmysqllearning.exception.InvalidPurchaseStatusException;
 import com.example.springmysqllearning.exception.ResourceNotFoundException;
 import com.example.springmysqllearning.repository.ProductRepository;
 import com.example.springmysqllearning.repository.PurchaseRepository;
@@ -23,6 +24,7 @@ import java.util.List;
 
 @Service
 public class PurchaseService {
+
     private final InventoryService inventoryService;
     private final PurchaseRepository purchaseRepository;
     private final SupplierRepository supplierRepository;
@@ -40,6 +42,10 @@ public class PurchaseService {
         this.inventoryService = inventoryService;
     }
 
+    // =========================================================
+    // CREATE PURCHASE
+    // =========================================================
+
     @Transactional
     public PurchaseResponseDTO createPurchase(
             PurchaseRequestDTO request) {
@@ -54,18 +60,32 @@ public class PurchaseService {
                                                 + request.getSupplierId()
                                 ));
 
+        /*
+         * A new purchase must start as DRAFT.
+         *
+         * We don't allow a client to create a purchase
+         * directly as RECEIVED because receiving a purchase
+         * has a business operation: stock must be increased.
+         */
+        if (request.getStatus() != null
+                && request.getStatus() != PurchaseStatus.DRAFT) {
+
+            throw new InvalidPurchaseStatusException(
+                    "New purchase must start with DRAFT status"
+            );
+        }
+
         Purchase purchase = new Purchase();
 
         purchase.setSupplier(supplier);
+
         purchase.setPurchaseDate(
                 request.getPurchaseDate()
         );
 
-        if (request.getStatus() == null) {
-            purchase.setStatus(PurchaseStatus.DRAFT);
-        } else {
-            purchase.setStatus(request.getStatus());
-        }
+        purchase.setStatus(
+                PurchaseStatus.DRAFT
+        );
 
         BigDecimal total = BigDecimal.ZERO;
 
@@ -82,12 +102,15 @@ public class PurchaseService {
                                                     + itemRequest.getProductId()
                                     ));
 
-            PurchaseItem item = new PurchaseItem();
+            PurchaseItem item =
+                    new PurchaseItem();
 
             item.setProduct(product);
+
             item.setQuantity(
                     itemRequest.getQuantity()
             );
+
             item.setUnitPrice(
                     itemRequest.getUnitPrice()
             );
@@ -109,12 +132,23 @@ public class PurchaseService {
 
         purchase.setTotalAmount(total);
 
+        /*
+         * stockApplied should remain false
+         * until the purchase is actually RECEIVED.
+         */
+        purchase.setStockApplied(false);
+
         Purchase savedPurchase =
                 purchaseRepository.save(purchase);
 
         return mapToResponse(savedPurchase);
     }
 
+    // =========================================================
+    // GET PURCHASES
+    // =========================================================
+
+    @Transactional(readOnly = true)
     public Page<PurchaseResponseDTO> getPurchases(
             Long supplierId,
             PurchaseStatus status,
@@ -147,50 +181,105 @@ public class PurchaseService {
         return purchases.map(this::mapToResponse);
     }
 
+    // =========================================================
+    // GET PURCHASE BY ID
+    // =========================================================
+
+    @Transactional(readOnly = true)
     public PurchaseResponseDTO getPurchaseById(Long id) {
 
         Purchase purchase =
                 purchaseRepository.findById(id)
                         .orElseThrow(() ->
                                 new ResourceNotFoundException(
-                                        "Purchase not found with id: " + id
+                                        "Purchase not found with id: "
+                                                + id
                                 ));
 
         return mapToResponse(purchase);
     }
+
+    // =========================================================
+    // UPDATE PURCHASE STATUS
+    // =========================================================
 
     @Transactional
     public PurchaseResponseDTO updatePurchaseStatus(
             Long id,
             PurchaseStatus newStatus) {
 
+        if (newStatus == null) {
+            throw new IllegalArgumentException(
+                    "New purchase status cannot be null"
+            );
+        }
+
         Purchase purchase =
                 purchaseRepository.findById(id)
                         .orElseThrow(() ->
                                 new ResourceNotFoundException(
-                                        "Purchase not found with id: " + id
+                                        "Purchase not found with id: "
+                                                + id
                                 ));
 
-        PurchaseStatus oldStatus =
+        PurchaseStatus currentStatus =
                 purchase.getStatus();
 
-        if (oldStatus == newStatus) {
+        // -----------------------------------------------------
+        // Same status = no operation
+        // -----------------------------------------------------
+
+        if (currentStatus == newStatus) {
             return mapToResponse(purchase);
         }
 
-        if (oldStatus == PurchaseStatus.CANCELLED) {
-            throw new IllegalArgumentException(
-                    "Cancelled purchase cannot change status"
-            );
-        }
+        // -----------------------------------------------------
+        // Terminal states
+        // -----------------------------------------------------
 
-        if (oldStatus == PurchaseStatus.RECEIVED) {
-            throw new IllegalArgumentException(
+        if (currentStatus == PurchaseStatus.RECEIVED) {
+
+            throw new InvalidPurchaseStatusException(
                     "Received purchase cannot change status"
             );
         }
 
-        if (newStatus == PurchaseStatus.RECEIVED) {
+        if (currentStatus == PurchaseStatus.CANCELLED) {
+
+            throw new InvalidPurchaseStatusException(
+                    "Cancelled purchase cannot change status"
+            );
+        }
+
+        // -----------------------------------------------------
+        // Validate transition
+        // -----------------------------------------------------
+
+        validatePurchaseStatusTransition(
+                currentStatus,
+                newStatus
+        );
+
+        // -----------------------------------------------------
+        // ORDERED → RECEIVED
+        //
+        // Increase stock exactly once.
+        // -----------------------------------------------------
+
+        if (currentStatus == PurchaseStatus.ORDERED
+                && newStatus == PurchaseStatus.RECEIVED) {
+
+            /*
+             * Extra protection against accidental duplicate
+             * inventory application.
+             */
+            if (purchase.isStockApplied()) {
+
+                throw new InvalidPurchaseStatusException(
+                        "Stock has already been applied for purchase id: "
+                                + id
+                );
+            }
 
             for (PurchaseItem item : purchase.getItems()) {
 
@@ -203,22 +292,68 @@ public class PurchaseService {
             purchase.setStockApplied(true);
         }
 
+        // -----------------------------------------------------
+        // Save new status
+        // -----------------------------------------------------
+
         purchase.setStatus(newStatus);
 
-        return mapToResponse(
-                purchaseRepository.save(purchase)
-        );
+        Purchase savedPurchase =
+                purchaseRepository.save(purchase);
+
+        return mapToResponse(savedPurchase);
     }
+
+    // =========================================================
+    // VALIDATE PURCHASE STATUS TRANSITION
+    // =========================================================
+
+    private void validatePurchaseStatusTransition(
+            PurchaseStatus currentStatus,
+            PurchaseStatus newStatus) {
+
+        boolean valid =
+                switch (currentStatus) {
+
+                    case DRAFT ->
+                            newStatus == PurchaseStatus.ORDERED
+                                    || newStatus == PurchaseStatus.CANCELLED;
+
+                    case ORDERED ->
+                            newStatus == PurchaseStatus.RECEIVED
+                                    || newStatus == PurchaseStatus.CANCELLED;
+
+                    case RECEIVED, CANCELLED ->
+                            false;
+                };
+
+        if (!valid) {
+
+            throw new InvalidPurchaseStatusException(
+                    "Invalid purchase status transition: "
+                            + currentStatus
+                            + " → "
+                            + newStatus
+            );
+        }
+    }
+
+    // =========================================================
+    // MAP ENTITY → RESPONSE DTO
+    // =========================================================
 
     private PurchaseResponseDTO mapToResponse(
             Purchase purchase) {
 
         List<PurchaseResponseDTO.PurchaseItemResponse>
-                itemResponses = new ArrayList<>();
+                itemResponses =
+                new ArrayList<>();
 
-        for (PurchaseItem item : purchase.getItems()) {
+        for (PurchaseItem item :
+                purchase.getItems()) {
 
-            Product product = item.getProduct();
+            Product product =
+                    item.getProduct();
 
             itemResponses.add(
                     new PurchaseResponseDTO.PurchaseItemResponse(
