@@ -15,19 +15,46 @@ public class CustomUserDetailsService
 
     public CustomUserDetailsService(
             UserRepository userRepository) {
+
         this.userRepository = userRepository;
     }
 
     @Override
-    public UserDetails loadUserByUsername(String username)
+    public UserDetails loadUserByUsername(
+            String username)
             throws UsernameNotFoundException {
 
-        User user = userRepository.findByEmail(username)
-                .orElseThrow(() ->
-                        new UsernameNotFoundException(
-                                "User not found with email: " + username
-                        )
-                );
+        User user =
+                userRepository.findByEmail(username)
+                        .orElseThrow(() ->
+                                new UsernameNotFoundException(
+                                        "User not found with email: "
+                                                + username
+                                )
+                        );
+
+        /*
+         * Roles are stored in the database as:
+         *
+         * USER
+         * ADMIN
+         *
+         * Spring Security internally creates:
+         *
+         * ROLE_USER
+         * ROLE_ADMIN
+         *
+         * when .roles(...) is used.
+         */
+
+        if (user.getRole() == null
+                || user.getRole().isBlank()) {
+
+            throw new UsernameNotFoundException(
+                    "User has no valid role: "
+                            + username
+            );
+        }
 
         return org.springframework.security.core.userdetails.User
                 .withUsername(user.getEmail())

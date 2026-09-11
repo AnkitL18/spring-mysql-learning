@@ -1,7 +1,7 @@
 package com.example.springmysqllearning.security;
 
-import com.example.springmysqllearning.service.JwtService;
 import com.example.springmysqllearning.service.CustomUserDetailsService;
+import com.example.springmysqllearning.service.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -40,27 +40,61 @@ public class JwtAuthenticationFilter
         String authHeader =
                 request.getHeader("Authorization");
 
-        if (authHeader == null ||
-                !authHeader.startsWith("Bearer ")) {
+        // =====================================================
+        // No Authorization header
+        // =====================================================
 
-            filterChain.doFilter(request, response);
+        if (authHeader == null
+                || !authHeader.startsWith("Bearer ")) {
+
+            filterChain.doFilter(
+                    request,
+                    response
+            );
+
             return;
         }
 
-        String token = authHeader.substring(7);
+        String token =
+                authHeader.substring(7).trim();
+
+        // Empty Bearer token
+        if (token.isEmpty()) {
+
+            filterChain.doFilter(
+                    request,
+                    response
+            );
+
+            return;
+        }
 
         try {
+
+            // =================================================
+            // Extract username/email from JWT
+            // =================================================
 
             String username =
                     jwtService.extractUsername(token);
 
-            if (username != null &&
-                    SecurityContextHolder.getContext()
-                            .getAuthentication() == null) {
+            // =================================================
+            // Only authenticate if no authentication already
+            // exists in the SecurityContext
+            // =================================================
+
+            if (username != null
+                    && SecurityContextHolder
+                    .getContext()
+                    .getAuthentication() == null) {
 
                 UserDetails userDetails =
                         userDetailsService
                                 .loadUserByUsername(username);
+
+                // =============================================
+                // Validate JWT against user
+                // =============================================
 
                 if (jwtService.isTokenValid(
                         token,
@@ -79,16 +113,26 @@ public class JwtAuthenticationFilter
                                     .buildDetails(request)
                     );
 
-                    SecurityContextHolder.getContext()
+                    SecurityContextHolder
+                            .getContext()
                             .setAuthentication(authentication);
                 }
             }
 
         } catch (Exception exception) {
-            // Invalid token: don't authenticate the request.
-            // The security configuration will decide what happens next.
+
+            /*
+             * Never authenticate an invalid JWT.
+             *
+             * We deliberately continue the filter chain.
+             * Protected endpoints will then be handled by
+             * Spring Security's authorization mechanism.
+             */
         }
 
-        filterChain.doFilter(request, response);
+        filterChain.doFilter(
+                request,
+                response
+        );
     }
 }
