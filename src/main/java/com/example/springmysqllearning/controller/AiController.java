@@ -1,11 +1,15 @@
 package com.example.springmysqllearning.controller;
 
 import com.example.springmysqllearning.dto.AiAssistantRequestDTO;
+import com.example.springmysqllearning.dto.AiConversationResponseDTO;
 import com.example.springmysqllearning.dto.AiRequestDTO;
 import com.example.springmysqllearning.dto.AiResponseDTO;
+import com.example.springmysqllearning.service.AiConversationService;
 import com.example.springmysqllearning.service.AiService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/ai")
@@ -13,14 +17,22 @@ public class AiController {
 
     private final AiService aiService;
 
-    public AiController(
-            AiService aiService) {
+    private final AiConversationService
+            aiConversationService;
 
-        this.aiService = aiService;
+    public AiController(
+            AiService aiService,
+            AiConversationService aiConversationService) {
+
+        this.aiService =
+                aiService;
+
+        this.aiConversationService =
+                aiConversationService;
     }
 
     // =========================================================
-    // TEST
+    // AI TEST
     // =========================================================
 
     @GetMapping("/test")
@@ -30,7 +42,7 @@ public class AiController {
     }
 
     // =========================================================
-    // NATURAL-LANGUAGE BUSINESS ASSISTANT
+    // STEP 13 — CONVERSATION ASSISTANT
     // =========================================================
 
     @PostMapping("/assistant")
@@ -39,13 +51,53 @@ public class AiController {
             @RequestBody
             AiAssistantRequestDTO request) {
 
-        return aiService.askBusinessAssistant(
-                request.getMessage()
+        return aiConversationService.sendMessage(
+                request.getMessage(),
+                request.getConversationId()
         );
     }
 
     // =========================================================
-    // OLD ENDPOINT
+    // GET MY CONVERSATIONS
+    // =========================================================
+
+    @GetMapping("/conversations")
+    public List<AiConversationResponseDTO>
+    getMyConversations() {
+
+        return aiConversationService
+                .getMyConversations();
+    }
+
+    // =========================================================
+    // GET ONE CONVERSATION
+    // =========================================================
+
+    @GetMapping("/conversations/{id}")
+    public AiConversationResponseDTO
+    getConversation(
+            @PathVariable Long id) {
+
+        return aiConversationService
+                .getConversation(id);
+    }
+
+    // =========================================================
+    // DELETE CONVERSATION
+    // =========================================================
+
+    @DeleteMapping("/conversations/{id}")
+    public String deleteConversation(
+            @PathVariable Long id) {
+
+        aiConversationService
+                .deleteConversation(id);
+
+        return "AI conversation deleted successfully";
+    }
+
+    // =========================================================
+    // OLD /ai/ask ENDPOINT
     // =========================================================
 
     @PostMapping("/ask")

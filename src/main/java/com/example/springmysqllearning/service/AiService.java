@@ -1,6 +1,7 @@
 package com.example.springmysqllearning.service;
 
 import com.example.springmysqllearning.dto.AiResponseDTO;
+import com.example.springmysqllearning.entity.AiMessage;
 import com.google.genai.Client;
 import com.google.genai.types.Content;
 import com.google.genai.types.GenerateContentConfig;
@@ -8,14 +9,19 @@ import com.google.genai.types.GenerateContentResponse;
 import com.google.genai.types.Part;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class AiService {
 
     private final Client geminiClient;
-    private final BusinessContextService businessContextService;
-    private final BusinessQueryService businessQueryService;
+
+    private final BusinessContextService
+            businessContextService;
+
+    private final BusinessQueryService
+            businessQueryService;
 
     private static final String MODEL =
             "gemini-3.5-flash-lite";
@@ -33,7 +39,8 @@ public class AiService {
         String apiKey =
                 System.getenv("GEMINI_API_KEY");
 
-        if (apiKey == null || apiKey.isBlank()) {
+        if (apiKey == null
+                || apiKey.isBlank()) {
 
             throw new IllegalStateException(
                     "GEMINI_API_KEY environment variable is not configured"
@@ -47,11 +54,12 @@ public class AiService {
     }
 
     // =========================================================
-    // NATURAL-LANGUAGE BUSINESS QUERY
+    // STEP 13 — CONVERSATION RESPONSE
     // =========================================================
 
-    public AiResponseDTO askBusinessAssistant(
-            String userMessage) {
+    public String generateConversationResponse(
+            String userMessage,
+            List<AiMessage> history) {
 
         if (userMessage == null
                 || userMessage.isBlank()) {
@@ -62,64 +70,74 @@ public class AiService {
         }
 
         // -----------------------------------------------------
-        // STEP 1 — Detect the business operation
+        // STEP 1 — Detect business intent
         // -----------------------------------------------------
 
         BusinessQueryType queryType =
-                businessQueryService.detectQueryType(
-                        userMessage
-                );
+                businessQueryService
+                        .detectQueryType(
+                                userMessage
+                        );
 
         // -----------------------------------------------------
         // STEP 2 — Execute approved Java query
         // -----------------------------------------------------
 
         String businessResult =
-                businessQueryService.executeQuery(
-                        queryType
-                );
+                businessQueryService
+                        .executeQuery(
+                                queryType
+                        );
 
         // -----------------------------------------------------
-        // STEP 3 — Add general business context
+        // STEP 3 — Gather general business context
         // -----------------------------------------------------
 
-        String generalContext =
+        String businessContext =
                 businessContextService
                         .buildBusinessContext();
 
         // -----------------------------------------------------
-        // STEP 4 — Give Gemini the real facts
+        // STEP 4 — System instruction
         // -----------------------------------------------------
 
         String systemInstruction = """
                 You are the AI Business Assistant inside
                 an AI-Powered Business Operations Management System.
 
-                The Java backend has already determined the
-                business query and retrieved the relevant data.
+                The Java backend owns the business data.
 
                 RULES:
 
-                1. Treat Java-retrieved data as the source of truth.
+                1. Treat Java-retrieved business information
+                   as the source of truth.
 
-                2. Never invent or change business numbers.
+                2. Never invent business numbers.
 
-                3. Do not claim that you performed a database
-                   operation or changed business data.
+                3. Never claim that you changed inventory,
+                   created an order, cancelled an order,
+                   changed a purchase, or performed another
+                   database operation.
 
-                4. Explain the supplied results in natural,
-                   easy-to-understand business language.
+                4. Use the conversation history to understand
+                   references such as:
+                   "it", "that product", "those orders",
+                   "what about them", etc.
 
-                5. If the requested query is unsupported,
-                   clearly say that this type of question is
-                   not currently supported.
+                5. The conversation history is context only.
+                   The latest Java-retrieved business result
+                   should be preferred for current business facts.
 
                 6. Do not generate SQL.
 
-                7. Do not ask the user to provide database details.
+                7. Do not ask the user for database credentials
+                   or database implementation details.
 
-                8. Clearly distinguish factual business data
-                   from general recommendations.
+                8. If the requested business information is
+                   unavailable, clearly say so.
+
+                9. Clearly separate actual business facts from
+                   general business recommendations.
 
                 DETECTED QUERY TYPE:
                 %s
@@ -127,12 +145,12 @@ public class AiService {
                 JAVA BUSINESS QUERY RESULT:
                 %s
 
-                GENERAL BUSINESS CONTEXT:
+                CURRENT BUSINESS CONTEXT:
                 %s
                 """.formatted(
                 queryType,
                 businessResult,
-                generalContext
+                businessContext
         );
 
         Content systemContent =
@@ -141,21 +159,78 @@ public class AiService {
                         .parts(
                                 List.of(
                                         Part.builder()
-                                                .text(systemInstruction)
+                                                .text(
+                                                        systemInstruction
+                                                )
                                                 .build()
                                 )
                         )
                         .build();
 
+        // -----------------------------------------------------
+        // STEP 5 — Build conversation history
+        // -----------------------------------------------------
+
+        List<Content> contents =
+                new ArrayList<>();
+
+        for (AiMessage message :
+                history) {
+
+            String role =
+                    message.getRole()
+                            == AiMessage.MessageRole.USER
+                            ? "user"
+                            : "model";
+
+            contents.add(
+                    Content.builder()
+                            .role(role)
+                            .parts(
+                                    List.of(
+                                            Part.builder()
+                                                    .text(
+                                                            message.getContent()
+                                                    )
+                                                    .build()
+                                    )
+                            )
+                            .build()
+            );
+        }
+
+        // -----------------------------------------------------
+        // STEP 6 — Add current user message
+        // -----------------------------------------------------
+
+        contents.add(
+                Content.builder()
+                        .role("user")
+                        .parts(
+                                List.of(
+                                        Part.builder()
+                                                .text(userMessage)
+                                                .build()
+                                )
+                        )
+                        .build()
+        );
+
+        // -----------------------------------------------------
+        // STEP 7 — Generate response
+        // -----------------------------------------------------
+
         GenerateContentConfig config =
                 GenerateContentConfig.builder()
-                        .systemInstruction(systemContent)
+                        .systemInstruction(
+                                systemContent
+                        )
                         .build();
 
         GenerateContentResponse response =
                 geminiClient.models.generateContent(
                         MODEL,
-                        userMessage,
+                        contents,
                         config
                 );
 
@@ -165,20 +240,25 @@ public class AiService {
         if (answer == null
                 || answer.isBlank()) {
 
-            answer =
-                    "Gemini returned an empty response.";
+            return "Gemini returned an empty response.";
         }
 
-        return new AiResponseDTO(answer);
+        return answer;
     }
 
     // =========================================================
-    // OLD METHOD
+    // OLD /ai/ask SUPPORT
     // =========================================================
 
     public AiResponseDTO askAi(
             String prompt) {
 
-        return askBusinessAssistant(prompt);
+        String answer =
+                generateConversationResponse(
+                        prompt,
+                        List.of()
+                );
+
+        return new AiResponseDTO(answer);
     }
 }
