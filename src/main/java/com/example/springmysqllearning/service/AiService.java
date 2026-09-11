@@ -8,33 +8,32 @@ import com.google.genai.types.GenerateContentResponse;
 import com.google.genai.types.Part;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class AiService {
 
     private final Client geminiClient;
     private final BusinessContextService businessContextService;
+    private final BusinessQueryService businessQueryService;
 
-    /*
-     * Keep the model that is already working in your project.
-     *
-     * You previously confirmed:
-     * gemini-3.5-flash-lite
-     * works with your Gemini setup.
-     */
     private static final String MODEL =
             "gemini-3.5-flash-lite";
 
     public AiService(
-            BusinessContextService businessContextService) {
+            BusinessContextService businessContextService,
+            BusinessQueryService businessQueryService) {
 
         this.businessContextService =
                 businessContextService;
 
+        this.businessQueryService =
+                businessQueryService;
+
         String apiKey =
                 System.getenv("GEMINI_API_KEY");
 
-        if (apiKey == null
-                || apiKey.isBlank()) {
+        if (apiKey == null || apiKey.isBlank()) {
 
             throw new IllegalStateException(
                     "GEMINI_API_KEY environment variable is not configured"
@@ -48,7 +47,7 @@ public class AiService {
     }
 
     // =========================================================
-    // BUSINESS ASSISTANT
+    // NATURAL-LANGUAGE BUSINESS QUERY
     // =========================================================
 
     public AiResponseDTO askBusinessAssistant(
@@ -62,57 +61,85 @@ public class AiService {
             );
         }
 
-        String businessContext =
+        // -----------------------------------------------------
+        // STEP 1 — Detect the business operation
+        // -----------------------------------------------------
+
+        BusinessQueryType queryType =
+                businessQueryService.detectQueryType(
+                        userMessage
+                );
+
+        // -----------------------------------------------------
+        // STEP 2 — Execute approved Java query
+        // -----------------------------------------------------
+
+        String businessResult =
+                businessQueryService.executeQuery(
+                        queryType
+                );
+
+        // -----------------------------------------------------
+        // STEP 3 — Add general business context
+        // -----------------------------------------------------
+
+        String generalContext =
                 businessContextService
                         .buildBusinessContext();
+
+        // -----------------------------------------------------
+        // STEP 4 — Give Gemini the real facts
+        // -----------------------------------------------------
 
         String systemInstruction = """
                 You are the AI Business Assistant inside
                 an AI-Powered Business Operations Management System.
 
-                Your job is to help a business user understand
-                their operational data clearly and practically.
+                The Java backend has already determined the
+                business query and retrieved the relevant data.
 
                 RULES:
 
-                1. Use the supplied BUSINESS DATA as the source
-                   of truth for business numbers.
+                1. Treat Java-retrieved data as the source of truth.
 
-                2. Never invent sales, inventory, customer,
-                   product, supplier, or order numbers.
+                2. Never invent or change business numbers.
 
-                3. If the supplied business data does not contain
-                   enough information to answer a question,
-                   clearly say that the available business context
-                   does not contain enough information.
+                3. Do not claim that you performed a database
+                   operation or changed business data.
 
-                4. Do not claim that you performed an operation
-                   such as creating an order, changing stock,
-                   deleting a customer, or updating a purchase.
+                4. Explain the supplied results in natural,
+                   easy-to-understand business language.
 
-                5. You are an assistant, not an authorization system.
-                   Never tell the user to bypass application security.
+                5. If the requested query is unsupported,
+                   clearly say that this type of question is
+                   not currently supported.
 
-                6. Keep business answers clear, useful, and concise.
+                6. Do not generate SQL.
 
-                7. When discussing low-stock products, use the
-                   actual low-stock details supplied below.
+                7. Do not ask the user to provide database details.
 
-                8. Distinguish between facts from the database
-                   and general business suggestions.
+                8. Clearly distinguish factual business data
+                   from general recommendations.
 
-                BUSINESS DATA:
+                DETECTED QUERY TYPE:
+                %s
 
+                JAVA BUSINESS QUERY RESULT:
+                %s
+
+                GENERAL BUSINESS CONTEXT:
                 %s
                 """.formatted(
-                businessContext
+                queryType,
+                businessResult,
+                generalContext
         );
 
         Content systemContent =
                 Content.builder()
                         .role("system")
                         .parts(
-                                java.util.List.of(
+                                List.of(
                                         Part.builder()
                                                 .text(systemInstruction)
                                                 .build()
@@ -146,15 +173,11 @@ public class AiService {
     }
 
     // =========================================================
-    // OLD GENERIC METHOD
-    // =========================================================
-    //
-    // Kept temporarily so your old /ai/ask endpoint
-    // does not immediately break.
-    //
+    // OLD METHOD
     // =========================================================
 
-    public AiResponseDTO askAi(String prompt) {
+    public AiResponseDTO askAi(
+            String prompt) {
 
         return askBusinessAssistant(prompt);
     }

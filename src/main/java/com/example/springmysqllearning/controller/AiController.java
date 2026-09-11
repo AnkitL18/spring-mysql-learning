@@ -20,7 +20,7 @@ public class AiController {
     }
 
     // =========================================================
-    // CONTROLLER TEST
+    // TEST
     // =========================================================
 
     @GetMapping("/test")
@@ -30,7 +30,7 @@ public class AiController {
     }
 
     // =========================================================
-    // NEW BUSINESS ASSISTANT ENDPOINT
+    // NATURAL-LANGUAGE BUSINESS ASSISTANT
     // =========================================================
 
     @PostMapping("/assistant")
@@ -46,9 +46,6 @@ public class AiController {
 
     // =========================================================
     // OLD ENDPOINT
-    //
-    // Kept temporarily for backwards compatibility.
-    // It now uses the business-aware AI service.
     // =========================================================
 
     @PostMapping("/ask")
