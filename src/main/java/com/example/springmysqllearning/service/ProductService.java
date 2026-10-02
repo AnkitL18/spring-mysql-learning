@@ -1,23 +1,28 @@
 package com.example.springmysqllearning.service;
+
 import org.springframework.transaction.annotation.Transactional;
+
 import com.example.springmysqllearning.dto.ProductRequestDTO;
 import com.example.springmysqllearning.dto.ProductResponseDTO;
 import com.example.springmysqllearning.entity.Category;
+import com.example.springmysqllearning.entity.Inventory;
 import com.example.springmysqllearning.entity.Product;
 import com.example.springmysqllearning.exception.ResourceNotFoundException;
 import com.example.springmysqllearning.repository.CategoryRepository;
+import com.example.springmysqllearning.repository.InventoryRepository;
 import com.example.springmysqllearning.repository.ProductRepository;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import com.example.springmysqllearning.entity.Inventory;
-import com.example.springmysqllearning.repository.InventoryRepository;
+
 @Service
 public class ProductService {
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
     private final InventoryRepository inventoryRepository;
+
     public ProductService(
             ProductRepository productRepository,
             CategoryRepository categoryRepository,
@@ -27,6 +32,10 @@ public class ProductService {
         this.categoryRepository = categoryRepository;
         this.inventoryRepository = inventoryRepository;
     }
+
+    // =========================================================
+    // CREATE PRODUCT
+    // =========================================================
 
     @Transactional
     public ProductResponseDTO createProduct(
@@ -60,6 +69,10 @@ public class ProductService {
 
         Product savedProduct =
                 productRepository.save(product);
+
+        /*
+         * Every new product receives its own inventory record.
+         */
         Inventory inventory = new Inventory();
 
         inventory.setProduct(savedProduct);
@@ -68,8 +81,13 @@ public class ProductService {
         inventory.setMaximumStock(100);
 
         inventoryRepository.save(inventory);
+
         return mapToResponse(savedProduct);
     }
+
+    // =========================================================
+    // GET PRODUCTS
+    // =========================================================
 
     public Page<ProductResponseDTO> getProducts(
             String search,
@@ -120,6 +138,10 @@ public class ProductService {
         return products.map(this::mapToResponse);
     }
 
+    // =========================================================
+    // GET PRODUCT BY ID
+    // =========================================================
+
     public ProductResponseDTO getProductById(Long id) {
 
         Product product =
@@ -131,6 +153,10 @@ public class ProductService {
 
         return mapToResponse(product);
     }
+
+    // =========================================================
+    // UPDATE PRODUCT
+    // =========================================================
 
     public ProductResponseDTO updateProduct(
             Long id,
@@ -175,6 +201,11 @@ public class ProductService {
         return mapToResponse(updatedProduct);
     }
 
+    // =========================================================
+    // DELETE PRODUCT
+    // =========================================================
+
+    @Transactional
     public void deleteProduct(Long id) {
 
         Product product =
@@ -184,8 +215,25 @@ public class ProductService {
                                         "Product not found with id: " + id
                                 ));
 
+        /*
+         * A product has an automatically-created inventory row.
+         * Delete that dependent record first.
+         */
+        Inventory inventory =
+                inventoryRepository
+                        .findByProductId(id)
+                        .orElse(null);
+
+        if (inventory != null) {
+            inventoryRepository.delete(inventory);
+        }
+
         productRepository.delete(product);
     }
+
+    // =========================================================
+    // MAP ENTITY → RESPONSE DTO
+    // =========================================================
 
     private ProductResponseDTO mapToResponse(
             Product product) {

@@ -1,6 +1,8 @@
 package com.example.springmysqllearning.config;
 
 import com.example.springmysqllearning.security.JwtAuthenticationFilter;
+import com.example.springmysqllearning.security.RestAccessDeniedHandler;
+import com.example.springmysqllearning.security.RestAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -13,8 +15,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import com.example.springmysqllearning.security.RestAccessDeniedHandler;
-import com.example.springmysqllearning.security.RestAuthenticationEntryPoint;
+
 @Configuration
 public class SecurityConfig {
 
@@ -81,6 +82,13 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
 
                 // -------------------------------------------------
+                // ENABLE CORS FOR REACT FRONTEND
+                // React: http://localhost:5173
+                // -------------------------------------------------
+
+                .cors(cors -> {})
+
+                // -------------------------------------------------
                 // Disable browser authentication mechanisms
                 // -------------------------------------------------
 
@@ -97,6 +105,11 @@ public class SecurityConfig {
                                 SessionCreationPolicy.STATELESS
                         )
                 )
+
+                // -------------------------------------------------
+                // REST authentication / authorization errors
+                // -------------------------------------------------
+
                 .exceptionHandling(exception -> exception
                         .authenticationEntryPoint(
                                 authenticationEntryPoint
@@ -115,6 +128,12 @@ public class SecurityConfig {
                         // -------------------------------------------------
                         // PUBLIC ENDPOINTS
                         // -------------------------------------------------
+
+                        .requestMatchers(
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/v3/api-docs/**"
+                        ).permitAll()
 
                         .requestMatchers("/auth/**")
                         .permitAll()
@@ -156,7 +175,6 @@ public class SecurityConfig {
                         .hasAnyRole("USER", "ADMIN")
 
                         // Change order status
-                        // Administrative/operational action
                         .requestMatchers(
                                 HttpMethod.PUT,
                                 "/orders/**"
