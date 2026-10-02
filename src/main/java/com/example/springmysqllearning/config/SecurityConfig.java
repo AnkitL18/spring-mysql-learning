@@ -79,7 +79,7 @@ public class SecurityConfig {
 
         configuration.setAllowedHeaders(List.of("*"));
 
-        configuration.setAllowCredentials(true);
+        configuration.setAllowCredentials(false);
 
         UrlBasedCorsConfigurationSource source =
                 new UrlBasedCorsConfigurationSource();
