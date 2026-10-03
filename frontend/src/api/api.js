@@ -1,6 +1,9 @@
-const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
-export async function apiRequest(endpoint, options = {}) {    const token = localStorage.getItem("jwt");
+const API_BASE_URL = (
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:8080"
+).trim().replace(/\/+$/, "");
+
+export async function apiRequest(endpoint, options = {}) {
+    const token = localStorage.getItem("jwt");
 
     const headers = {
         "Content-Type": "application/json",
@@ -16,6 +19,7 @@ export async function apiRequest(endpoint, options = {}) {    const token = loca
         headers
     });
 
+    // rest of your existing code...
     if (response.status === 401) {
         localStorage.removeItem("jwt");
         localStorage.removeItem("user");
